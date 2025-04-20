@@ -1,15 +1,18 @@
 import './globals.css';
+import { Inter } from 'next/font/google';
+
+const inter = Inter({ subsets: ['latin'] });
 
 export const metadata = {
   title: 'Workflow Builder',
-  description: 'Build automated workflows with ease',
+  description: 'A visual workflow builder application',
 };
 
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
-      <body>
-        <main className="min-h-screen bg-gray-50">{children}</main>
+      <body className={inter.className}>
+        {children}
       </body>
     </html>
   );
