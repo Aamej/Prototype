@@ -5,6 +5,9 @@ import { Handle, Position } from 'reactflow';
 import { Zap } from 'lucide-react';
 
 const TriggerNode = ({ data }) => {
+  const triggerEvent = data.config?.event || 'Select a trigger';
+  const description = data.config?.description || 'Start your workflow';
+
   return (
     <div className="px-4 py-2 shadow-md rounded-md bg-white border-2 border-indigo-500 w-64">
       <div className="flex items-center">
@@ -12,8 +15,8 @@ const TriggerNode = ({ data }) => {
           <Zap size={16} />
         </div>
         <div className="ml-2">
-          <div className="text-sm font-medium">{data.label || 'Trigger'}</div>
-          <div className="text-xs text-gray-500">{data.description || 'Start your workflow'}</div>
+          <div className="text-sm font-medium">{triggerEvent}</div>
+          <div className="text-xs text-gray-500">{description}</div>
         </div>
       </div>
       <Handle

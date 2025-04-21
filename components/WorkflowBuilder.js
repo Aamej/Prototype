@@ -24,17 +24,44 @@ const nodeTypes = {
   condition: ConditionNode,
 };
 
-const WorkflowBuilder = ({ onNodeSelect, onSave }) => {
+const getNodeLabel = (type, config) => {
+  switch (type) {
+    case 'trigger':
+      return config?.event || 'Select a trigger';
+    case 'action':
+      return config?.actionType || 'Select an action';
+    case 'condition':
+      return config?.conditionType || 'Select a condition';
+    default:
+      return `${type} node`;
+  }
+};
+
+const WorkflowBuilder = ({ onNodeSelect, onSave, initialNodes = [], initialEdges = [] }) => {
   const [mounted, setMounted] = useState(false);
-  const [nodes, setNodes, onNodesChange] = useNodesState([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
-  const [selectedNode, setSelectedNode] = useState(null);
+  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const { project } = useReactFlow();
 
   // Only render on client-side
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  // Initialize nodes and edges when they change
+  useEffect(() => {
+    if (mounted) {
+      setNodes(initialNodes);
+      setEdges(initialEdges);
+    }
+  }, [initialNodes, initialEdges, mounted, setNodes, setEdges]);
+
+  // Save changes to parent
+  useEffect(() => {
+    if (mounted && onSave) {
+      onSave({ nodes, edges });
+    }
+  }, [nodes, edges, onSave, mounted]);
 
   const onConnect = useCallback(
     (params) => setEdges((eds) => addEdge({ ...params, animated: true }, eds)),
@@ -56,8 +83,12 @@ const WorkflowBuilder = ({ onNodeSelect, onSave }) => {
         type,
         position,
         data: { 
-          label: `${type} node`,
-          config: {}
+          label: getNodeLabel(type),
+          config: {
+            actionType: type === 'action' ? '' : undefined,
+            event: type === 'trigger' ? '' : undefined,
+            conditionType: type === 'condition' ? '' : undefined,
+          }
         },
       };
 
@@ -72,25 +103,43 @@ const WorkflowBuilder = ({ onNodeSelect, onSave }) => {
   }, []);
 
   const onNodeClick = useCallback((_, node) => {
-    setSelectedNode(node);
-    onNodeSelect(node);
+    if (onNodeSelect) {
+      onNodeSelect(node);
+    }
   }, [onNodeSelect]);
 
-  const handleSave = useCallback(() => {
-    if (onSave) {
-      onSave({ nodes, edges });
+  // Update node when configuration changes
+  const updateNodeConfig = useCallback((nodeId, config) => {
+    setNodes((nds) =>
+      nds.map((node) => {
+        if (node.id === nodeId) {
+          const updatedNode = {
+            ...node,
+            data: {
+              ...node.data,
+              config: {
+                ...node.data.config,
+                ...config
+              },
+              label: getNodeLabel(node.type, {
+                ...node.data.config,
+                ...config
+              })
+            }
+          };
+          return updatedNode;
+        }
+        return node;
+      })
+    );
+  }, [setNodes]);
+
+  // Add updateNodeConfig to the parent component's scope
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.updateNodeConfig = updateNodeConfig;
     }
-  }, [nodes, edges, onSave]);
-
-  const handleUndo = useCallback(() => {
-    // Implement undo functionality
-    console.log('Undo');
-  }, []);
-
-  const handleRedo = useCallback(() => {
-    // Implement redo functionality
-    console.log('Redo');
-  }, []);
+  }, [updateNodeConfig]);
 
   // Don't render anything on server-side
   if (!mounted) {
@@ -114,26 +163,6 @@ const WorkflowBuilder = ({ onNodeSelect, onSave }) => {
         <Background />
         <Controls />
         <MiniMap />
-        <Panel position="top-right" className="flex gap-2">
-          <button 
-            onClick={handleUndo}
-            className="px-3 py-1 bg-white border border-gray-300 rounded-md shadow-sm hover:bg-gray-50"
-          >
-            Undo
-          </button>
-          <button 
-            onClick={handleRedo}
-            className="px-3 py-1 bg-white border border-gray-300 rounded-md shadow-sm hover:bg-gray-50"
-          >
-            Redo
-          </button>
-          <button 
-            onClick={handleSave}
-            className="px-3 py-1 bg-indigo-600 text-white rounded-md hover:bg-indigo-700"
-          >
-            Save
-          </button>
-        </Panel>
       </ReactFlow>
     </div>
   );

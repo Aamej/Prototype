@@ -1,4 +1,10 @@
 {
+  "app\\dashboard\\page.js -> ../../components/GmailAuthPanel": {
+    "id": "app\\dashboard\\page.js -> ../../components/GmailAuthPanel",
+    "files": [
+      "static/chunks/_app-pages-browser_components_GmailAuthPanel_js.js"
+    ]
+  },
   "app\\dashboard\\page.js -> ../../components/WorkflowBuilder": {
     "id": "app\\dashboard\\page.js -> ../../components/WorkflowBuilder",
     "files": [
@@ -9,18 +15,6 @@
     "id": "node_modules\\next\\dist\\client\\components\\react-dev-overlay\\utils\\use-websocket.js -> @vercel/turbopack-ecmascript-runtime/browser/dev/hmr-client/hmr-client.ts",
     "files": [
       "static/chunks/_app-pages-browser_node_modules_next_dist_client_dev_noop-turbopack-hmr_js.js"
-    ]
-  },
-  "node_modules\\next\\dist\\client\\index.js -> ../pages/_app": {
-    "id": "node_modules\\next\\dist\\client\\index.js -> ../pages/_app",
-    "files": [
-      "static/chunks/_pages-dir-browser_node_modules_next_dist_pages__app_js.js"
-    ]
-  },
-  "node_modules\\next\\dist\\client\\index.js -> ../pages/_error": {
-    "id": "node_modules\\next\\dist\\client\\index.js -> ../pages/_error",
-    "files": [
-      "static/chunks/_pages-dir-browser_node_modules_next_dist_pages__error_js.js"
     ]
   }
 }

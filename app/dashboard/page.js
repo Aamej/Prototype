@@ -1,17 +1,37 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import dynamic from 'next/dynamic';
+import { useSession } from 'next-auth/react';
 import Sidebar from '../../components/Sidebar';
-import ReactFlowProviderWrapper from '../../components/ReactFlowProviderWrapper';
+import ReactFlowWrapper from '../../components/ReactFlowWrapper';
 
+// Import GmailAuthPanel dynamically to avoid hydration issues
+const GmailAuthPanel = dynamic(() => import('../../components/GmailAuthPanel'), {
+  ssr: false
+});
+
+// Import WorkflowBuilder dynamically
 const WorkflowBuilder = dynamic(() => import('../../components/WorkflowBuilder'), {
   ssr: false
 });
 
+// Create a client-side only input component
+const ClientOnlyInput = dynamic(() => Promise.resolve(({ value, onChange, placeholder }) => (
+  <input
+    type="text"
+    value={value}
+    onChange={onChange}
+    className="text-xl font-semibold bg-transparent border-none focus:outline-none"
+    placeholder={placeholder}
+  />
+)), { ssr: false });
+
 export default function Dashboard() {
+  const { data: session, status } = useSession();
+  const [mounted, setMounted] = useState(false);
   const [selectedNode, setSelectedNode] = useState(null);
-  const [workflow, setWorkflow] = useState({ 
+  const [workflow, setWorkflow] = useState({
     name: 'Untitled Workflow',
     nodes: [],
     edges: []
@@ -19,19 +39,62 @@ export default function Dashboard() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
 
+  // Handle initial mount and workflow loading
+  useEffect(() => {
+    setMounted(true);
+    loadWorkflowFromStorage();
+  }, []);
+
+  // Load workflow when auth status changes
+  useEffect(() => {
+    if (status === 'authenticated') {
+      loadWorkflowFromStorage();
+    }
+  }, [status]);
+
+  const loadWorkflowFromStorage = () => {
+    try {
+      const saved = localStorage.getItem('currentWorkflow');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        setWorkflow(parsed);
+
+        // Restore selected node if there was one
+        const lastActiveNodeId = sessionStorage.getItem('lastActiveNodeId');
+        if (lastActiveNodeId) {
+          const node = parsed.nodes.find(n => n.id === lastActiveNodeId);
+          if (node) {
+            setSelectedNode(node);
+            sessionStorage.removeItem('lastActiveNodeId');
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Error loading workflow:', e);
+    }
+  };
+
+  // Save workflow to localStorage whenever it changes
+  useEffect(() => {
+    if (mounted && (workflow.nodes.length > 0 || workflow.edges.length > 0 || workflow.name !== 'Untitled Workflow')) {
+      localStorage.setItem('currentWorkflow', JSON.stringify(workflow));
+    }
+  }, [workflow, mounted]);
+
   const handleNodeSelect = useCallback((node) => {
     setSelectedNode(node);
+    // Save selected node ID for restoration after auth
+    if (node) {
+      sessionStorage.setItem('lastActiveNodeId', node.id);
+    }
   }, []);
 
   const handleSaveWorkflow = useCallback(async () => {
     try {
       setIsLoading(true);
       setError(null);
-      
-      // For now, just log the workflow
+      localStorage.setItem('currentWorkflow', JSON.stringify(workflow));
       console.log('Saving workflow:', workflow);
-      
-      // Show success message
       alert('Workflow saved successfully!');
     } catch (error) {
       console.error('Error saving workflow:', error);
@@ -42,12 +105,56 @@ export default function Dashboard() {
   }, [workflow]);
 
   const handleWorkflowChange = useCallback(({ nodes, edges }) => {
-    setWorkflow(prev => ({
-      ...prev,
-      nodes,
-      edges
-    }));
-  }, []);
+    setWorkflow(prev => {
+      const updated = {
+        ...prev,
+        nodes,
+        edges
+      };
+      if (mounted) {
+        localStorage.setItem('currentWorkflow', JSON.stringify(updated));
+      }
+      return updated;
+    });
+  }, [mounted]);
+
+  const handleGmailAuth = useCallback(({ email, isAuthenticated, nodeType, accessToken }) => {
+    if (!selectedNode) return;
+
+    setWorkflow(prev => {
+      const updatedNodes = prev.nodes.map(node => {
+        if (node.id === selectedNode.id) {
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              config: {
+                ...node.data.config,
+                gmailAuth: {
+                  email,
+                  isAuthenticated,
+                  accessToken
+                }
+              }
+            }
+          };
+        }
+        return node;
+      });
+
+      const updated = {
+        ...prev,
+        nodes: updatedNodes
+      };
+      localStorage.setItem('currentWorkflow', JSON.stringify(updated));
+      return updated;
+    });
+  }, [selectedNode]);
+
+  // Don't render anything until after mount
+  if (!mounted) {
+    return null;
+  }
 
   return (
     <div className="flex h-screen overflow-hidden">
@@ -55,11 +162,9 @@ export default function Dashboard() {
       <div className="flex-1 flex">
         <div className="flex-1 flex flex-col">
           <div className="h-14 border-b border-gray-200 flex items-center px-4 bg-white">
-            <input
-              type="text"
+            <ClientOnlyInput
               value={workflow.name}
               onChange={(e) => setWorkflow({ ...workflow, name: e.target.value })}
-              className="text-xl font-semibold bg-transparent border-none focus:outline-none"
               placeholder="Untitled Workflow"
             />
             <div className="ml-auto flex items-center space-x-4">
@@ -94,12 +199,14 @@ export default function Dashboard() {
             </div>
           </div>
           <div className="flex-1">
-            <ReactFlowProviderWrapper>
+            <ReactFlowWrapper>
               <WorkflowBuilder 
                 onNodeSelect={handleNodeSelect} 
                 onSave={handleWorkflowChange}
+                initialNodes={workflow.nodes}
+                initialEdges={workflow.edges}
               />
-            </ReactFlowProviderWrapper>
+            </ReactFlowWrapper>
           </div>
         </div>
         {selectedNode && (
@@ -115,6 +222,16 @@ export default function Dashboard() {
                 <div className="mt-1 text-sm">{selectedNode.id}</div>
               </div>
               
+              {selectedNode && (selectedNode.type === 'trigger' || selectedNode.type === 'action') && (
+                <div className="border-t border-gray-200 pt-4">
+                  <GmailAuthPanel 
+                    onAuth={handleGmailAuth}
+                    nodeType={selectedNode.type}
+                    initialEmail={selectedNode.data?.config?.gmailAuth?.email || ''}
+                  />
+                </div>
+              )}
+              
               {selectedNode.type === 'trigger' && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700">Trigger Event</label>
@@ -128,41 +245,6 @@ export default function Dashboard() {
                     <option value="new_attachment">New Attachment</option>
                     <option value="email_matching_search">Email Matching Search</option>
                     <option value="calendar_event">Calendar Event</option>
-                  </select>
-                </div>
-              )}
-              
-              {selectedNode.type === 'action' && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">Action Type</label>
-                  <select 
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
-                    value={selectedNode.data?.config?.actionType || ''}
-                    onChange={(e) => handleUpdateNodeConfig({ actionType: e.target.value })}
-                  >
-                    <option value="">Select an action</option>
-                    <option value="send_email">Send Email</option>
-                    <option value="create_draft">Create Draft</option>
-                    <option value="add_label">Add Label</option>
-                    <option value="send_message">Send Message</option>
-                    <option value="create_document">Create Document</option>
-                  </select>
-                </div>
-              )}
-              
-              {selectedNode.type === 'condition' && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">Condition Type</label>
-                  <select 
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
-                    value={selectedNode.data?.config?.conditionType || ''}
-                    onChange={(e) => handleUpdateNodeConfig({ conditionType: e.target.value })}
-                  >
-                    <option value="">Select a condition</option>
-                    <option value="contains">Contains</option>
-                    <option value="equals">Equals</option>
-                    <option value="greater_than">Greater Than</option>
-                    <option value="less_than">Less Than</option>
                   </select>
                 </div>
               )}
