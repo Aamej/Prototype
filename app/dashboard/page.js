@@ -5,6 +5,7 @@ import dynamic from 'next/dynamic';
 import { useSession } from 'next-auth/react';
 import Sidebar from '../../components/Sidebar';
 import ReactFlowWrapper from '../../components/ReactFlowWrapper';
+import { debounce } from 'lodash';
 
 // Import GmailAuthPanel dynamically to avoid hydration issues
 const GmailAuthPanel = dynamic(() => import('../../components/GmailAuthPanel'), {
@@ -26,6 +27,20 @@ const ClientOnlyInput = dynamic(() => Promise.resolve(({ value, onChange, placeh
     placeholder={placeholder}
   />
 )), { ssr: false });
+
+// Utility function to get node label based on type and config
+const getNodeLabel = (type, config) => {
+  switch (type) {
+    case 'trigger':
+      return config?.event || 'Select a trigger';
+    case 'action':
+      return config?.actionType || 'Select an action';
+    case 'condition':
+      return config?.conditionType || 'Select a condition';
+    default:
+      return `${type} node`;
+  }
+};
 
 export default function Dashboard() {
   const { data: session, status } = useSession();
@@ -52,17 +67,44 @@ export default function Dashboard() {
     }
   }, [status]);
 
+  // Debounced save function
+  const debouncedSave = useCallback(
+    debounce((workflowToSave) => {
+      if (mounted && workflowToSave) {
+        const hasNodes = Array.isArray(workflowToSave.nodes) && workflowToSave.nodes.length > 0;
+        const hasEdges = Array.isArray(workflowToSave.edges) && workflowToSave.edges.length > 0;
+        const hasCustomName = workflowToSave.name !== 'Untitled Workflow';
+
+        if (hasNodes || hasEdges || hasCustomName) {
+          localStorage.setItem('currentWorkflow', JSON.stringify(workflowToSave));
+        }
+      }
+    }, 1000),
+    [mounted]
+  );
+
+  // Save workflow to localStorage whenever it changes
+  useEffect(() => {
+    debouncedSave(workflow);
+    return () => debouncedSave.cancel();
+  }, [workflow, debouncedSave]);
+
   const loadWorkflowFromStorage = () => {
     try {
       const saved = localStorage.getItem('currentWorkflow');
       if (saved) {
         const parsed = JSON.parse(saved);
-        setWorkflow(parsed);
+        // Ensure the parsed data has the required structure
+        setWorkflow({
+          name: parsed.name || 'Untitled Workflow',
+          nodes: Array.isArray(parsed.nodes) ? parsed.nodes : [],
+          edges: Array.isArray(parsed.edges) ? parsed.edges : []
+        });
 
         // Restore selected node if there was one
         const lastActiveNodeId = sessionStorage.getItem('lastActiveNodeId');
         if (lastActiveNodeId) {
-          const node = parsed.nodes.find(n => n.id === lastActiveNodeId);
+          const node = parsed.nodes?.find(n => n.id === lastActiveNodeId);
           if (node) {
             setSelectedNode(node);
             sessionStorage.removeItem('lastActiveNodeId');
@@ -71,15 +113,14 @@ export default function Dashboard() {
       }
     } catch (e) {
       console.error('Error loading workflow:', e);
+      // Reset to initial state if there's an error
+      setWorkflow({
+        name: 'Untitled Workflow',
+        nodes: [],
+        edges: []
+      });
     }
   };
-
-  // Save workflow to localStorage whenever it changes
-  useEffect(() => {
-    if (mounted && (workflow.nodes.length > 0 || workflow.edges.length > 0 || workflow.name !== 'Untitled Workflow')) {
-      localStorage.setItem('currentWorkflow', JSON.stringify(workflow));
-    }
-  }, [workflow, mounted]);
 
   const handleNodeSelect = useCallback((node) => {
     setSelectedNode(node);
@@ -106,17 +147,24 @@ export default function Dashboard() {
 
   const handleWorkflowChange = useCallback(({ nodes, edges }) => {
     setWorkflow(prev => {
-      const updated = {
-        ...prev,
-        nodes,
-        edges
-      };
-      if (mounted) {
-        localStorage.setItem('currentWorkflow', JSON.stringify(updated));
+      // Only update if there are actual changes
+      const prevNodes = prev.nodes || [];
+      const prevEdges = prev.edges || [];
+      const newNodes = nodes || [];
+      const newEdges = edges || [];
+      
+      if (JSON.stringify(prevNodes) === JSON.stringify(newNodes) && 
+          JSON.stringify(prevEdges) === JSON.stringify(newEdges)) {
+        return prev;
       }
-      return updated;
+      
+      return {
+        ...prev,
+        nodes: newNodes,
+        edges: newEdges
+      };
     });
-  }, [mounted]);
+  }, []);
 
   const handleGmailAuth = useCallback(({ email, isAuthenticated, nodeType, accessToken }) => {
     if (!selectedNode) return;
@@ -142,13 +190,51 @@ export default function Dashboard() {
         return node;
       });
 
-      const updated = {
+      return {
         ...prev,
         nodes: updatedNodes
       };
-      localStorage.setItem('currentWorkflow', JSON.stringify(updated));
-      return updated;
     });
+  }, [selectedNode]);
+
+  const handleUpdateNodeConfig = useCallback((updates) => {
+    if (!selectedNode) return;
+
+    // Update the node in the workflow state
+    setWorkflow(prev => {
+      const updatedNodes = prev.nodes.map(node => {
+        if (node.id === selectedNode.id) {
+          const updatedNode = {
+            ...node,
+            data: {
+              ...node.data,
+              config: {
+                ...node.data.config,
+                ...updates
+              },
+              label: getNodeLabel(node.type, {
+                ...node.data.config,
+                ...updates
+              })
+            }
+          };
+          // Update the selected node to reflect changes immediately
+          setSelectedNode(updatedNode);
+          return updatedNode;
+        }
+        return node;
+      });
+
+      return {
+        ...prev,
+        nodes: updatedNodes
+      };
+    });
+
+    // Update the node in ReactFlow using the global updateNodeConfig function
+    if (typeof window !== 'undefined' && window.updateNodeConfig) {
+      window.updateNodeConfig(selectedNode.id, updates);
+    }
   }, [selectedNode]);
 
   // Don't render anything until after mount
@@ -245,6 +331,25 @@ export default function Dashboard() {
                     <option value="new_attachment">New Attachment</option>
                     <option value="email_matching_search">Email Matching Search</option>
                     <option value="calendar_event">Calendar Event</option>
+                  </select>
+                </div>
+              )}
+
+              {selectedNode.type === 'action' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Action Type</label>
+                  <select 
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                    value={selectedNode.data?.config?.actionType || ''}
+                    onChange={(e) => handleUpdateNodeConfig({ actionType: e.target.value })}
+                  >
+                    <option value="">Select an action</option>
+                    <option value="send_email">Send Email</option>
+                    <option value="create_draft">Create Draft</option>
+                    <option value="add_label">Add Label</option>
+                    <option value="move_to_folder">Move to Folder</option>
+                    <option value="mark_as_read">Mark as Read</option>
+                    <option value="mark_as_unread">Mark as Unread</option>
                   </select>
                 </div>
               )}

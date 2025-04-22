@@ -48,18 +48,21 @@ const WorkflowBuilder = ({ onNodeSelect, onSave, initialNodes = [], initialEdges
     setMounted(true);
   }, []);
 
-  // Initialize nodes and edges when they change
+  // Initialize nodes and edges only once when mounted
   useEffect(() => {
-    if (mounted) {
-      setNodes(initialNodes);
-      setEdges(initialEdges);
+    if (mounted && (!initialNodes || initialNodes.length === 0) && (!initialEdges || initialEdges.length === 0)) {
+      setNodes(initialNodes || []);
+      setEdges(initialEdges || []);
     }
-  }, [initialNodes, initialEdges, mounted, setNodes, setEdges]);
+  }, [mounted, initialNodes, initialEdges, setNodes, setEdges]);
 
-  // Save changes to parent
+  // Save changes to parent with debounce
   useEffect(() => {
     if (mounted && onSave) {
-      onSave({ nodes, edges });
+      const timeoutId = setTimeout(() => {
+        onSave({ nodes, edges });
+      }, 500);
+      return () => clearTimeout(timeoutId);
     }
   }, [nodes, edges, onSave, mounted]);
 
